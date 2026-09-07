@@ -1,0 +1,37 @@
+#!/usr/bin/env python3
+"""OpenRouter — credit limit on your API key.
+
+To enable:
+    cp 30-openrouter.example ~/.config/dev-hud/providers/30-openrouter
+    chmod +x ~/.config/dev-hud/providers/30-openrouter
+    echo "sk-or-v1-..." > ~/.config/dev-hud/openrouter.key
+
+Only shows a bar if the key has a credit limit set. An unlimited key has
+nothing to show a percentage against.
+"""
+import json, os, sys, urllib.request
+
+def fail(msg):
+    print(json.dumps({"name": "OpenRouter", "error": msg})); sys.exit(0)
+
+p = os.path.expanduser("~/.config/dev-hud/openrouter.key")
+if not os.path.exists(p):
+    fail("no key at ~/.config/dev-hud/openrouter.key")
+k = open(p).read().strip()
+
+req = urllib.request.Request("https://openrouter.ai/api/v1/key",
+                             headers={"Authorization": "Bearer " + k})
+try:
+    with urllib.request.urlopen(req, timeout=15) as r:
+        d = (json.loads(r.read().decode()) or {}).get("data") or {}
+except Exception as e:
+    fail(f"request failed: {type(e).__name__}")
+
+limit = d.get("limit")
+used = d.get("usage")
+if limit in (None, 0) or used is None:
+    fail("key has no credit limit set")
+
+label = (d.get("limit_reset") or "credits")
+print(json.dumps({"name": "OpenRouter",
+                  "windows": [{"label": label, "pct": used / limit * 100}]}))

@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""Claude — 5-hour window, read from the Claude desktop app's own local record.
+
+No key, no login, no network. The app stores its 5-hour limit warning state in
+Local Storage; this reads it. Weekly and per-model windows are fetched live by
+the app and never written to disk, so they can't be shown here.
+"""
+import json, os, re, subprocess, sys, time
+
+LS = os.path.expanduser("~/Library/Application Support/Claude/Local Storage/leveldb")
+
+def fail(msg):
+    print(json.dumps({"name": "Claude", "error": msg})); sys.exit(0)
+
+if not os.path.isdir(LS):
+    fail("Claude desktop app not found")
+
+try:
+    raw = subprocess.run(["bash", "-c", f'strings -a "{LS}"/* 2>/dev/null'],
+                         capture_output=True, timeout=25).stdout.decode("utf-8", "ignore")
+except Exception:
+    fail("could not read local storage")
+
+now_ms = int(time.time() * 1000)
+best = None   # (observedAt, utilization, resetsAt)
+for m in re.finditer(r'"resetsAt":(\d+),"utilization":([0-9.]+)([^{]{0,90})', raw):
+    resets, util, rest = int(m.group(1)), float(m.group(2)), m.group(3)
+    if resets * 1000 <= now_ms:
+        continue
+    om = re.search(r'"observedAt":([0-9.]+)', rest)
+    obs = float(om.group(1)) if om else 0.0
+    if best is None or (obs, util) > (best[0], best[1]):
+        best = (obs, util, resets)
+
+if not best:
+    fail("no current window on disk — open the Claude app")
+
+obs, util, resets = best
+print(json.dumps({"name": "Claude",
+                  "windows": [{"label": "5-hour",
+                               "pct": util * 100,
+                               "resets": resets * 1000}]}))
